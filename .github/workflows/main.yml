@@ -1,270 +1,261 @@
-name: "Build kernels"
+name: "🔬 Build Research Kernel"
 
 env:
   OUT_DIR: "out"
   KERNEL_VERSION: "5.15"
-  ANDROID_VERSION: "13"
 
 on:
   workflow_dispatch:
     inputs:
       kernelSourceURL:
-        description: "Kernel source URL"
+        description: "Your kernel fork URL"
         required: true
         type: string
-        default: "https://github.com/topnotchfreaks/kernel_msm-5.15"
+        default: "https://github.com/rorkx/kernel_msm-5.15"
       kernelBranch:
         description: "Kernel branch"
         required: false
         type: string
-        default: "codelinaro"
-      kernelDevice:
-        description: "Device (used for defconfig)"
+        default: "zepharo"
+      kernelConfig:
+        description: "Kernel configuration type"
         required: true
-        type: string
-        default: "gki"
-      localVersion:
-        description: "Custom localversion name (e.g., -mybuild)"
-        required: false
-        type: string
-        default: ""
-      buildKSU:
-        description: "Build KSU variant?"
-        required: false
-        type: boolean
-        default: true
-      ltoMode:
-        description: "Choose LTO mode"
-        required: true
-        default: "thin"
         type: choice
         options:
-          - "thin"
-          - "full"
+          - "bugbounty"
+          - "standard"
+          - "minimal"
+      researchMode:
+        description: "Enable research features"
+        type: boolean
+        default: true
+      localVersion:
+        description: "Custom localversion (e.g. -research)"
+        required: false
+        type: string
+        default: "-research"
 
 jobs:
-  Build-Kernel:
-    name: "🚀 Build Kernel"
+  Build-Research-Kernel:
+    name: "🔬 Build Research Kernel"
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        variant: ${{ fromJSON(inputs.buildKSU == true && '["noksu", "ksu"]' || '["noksu"]') }}
-    env:
-      kernelDir: common_${{ github.event.inputs.kernelDevice }}
-      kernelName: common
-      DEFCONFIG_NAME: ${{ github.event.inputs.kernelDevice }}_defconfig
-      WORK_DIR: ${{ github.workspace }}
-
+    
     steps:
-      - name: "✨ Setup workspace"
+      - name: "🛠️ Setup build environment"
         run: |
-          mkdir -p $kernelDir
           echo "BUILD_TIME=$(date +'%Y-%m-%d')" >> $GITHUB_ENV
           sudo apt-get update -qq
-          sudo apt-get install -y repo rsync aria2
+          sudo apt-get install -y build-essential flex bison libssl-dev libelf-dev bc python3 git zip
+          sudo apt-get install -y gcc-aarch64-linux-gnu
 
-          # Setup swap based on LTO mode
-          if [ "${{ github.event.inputs.ltoMode }}" = "full" ]; then
-            SWAP_SIZE=8G
-          else
-            SWAP_SIZE=4G
-          fi
-          sudo fallocate -l $SWAP_SIZE /swapfile
+          # Setup swap for large builds
+          sudo fallocate -l 6G /swapfile
           sudo chmod 600 /swapfile
           sudo mkswap /swapfile
           sudo swapon /swapfile
           echo "vm.swappiness=60" | sudo tee -a /etc/sysctl.conf
           sudo sysctl -p
 
-      - name: "🌟 Clone kernel source"
-        working-directory: ./${{ env.kernelDir }}
+      - name: "📥 Clone research kernel"
         run: |
           git clone --recursive --branch ${{ github.event.inputs.kernelBranch }} \
-            ${{ github.event.inputs.kernelSourceURL }} ${{ env.kernelName }} --depth=1
+            ${{ github.event.inputs.kernelSourceURL }} kernel-source --depth=1
+          cd kernel-source
+          echo "KERNEL_DIR=$(pwd)" >> $GITHUB_ENV
 
-      - name: "📥 Initialize repo"
-        working-directory: ${{ env.WORK_DIR}}
+      - name: "⚙️ Configure research kernel"
+        working-directory: ${{ env.KERNEL_DIR }}
         run: |
-          repo init -u https://android.googlesource.com/kernel/manifest -b common-android13-5.15-lts --depth=1
-          repo sync --optimized-fetch --prune --no-clone-bundle --no-tags -j$(nproc --all)
+          # Create base config
+          make ARCH=arm64 topaz_defconfig
           
-          rm -rf .repo
-          rm -rf common
-
-          aria2c -x 16 -s 16 -o prebuilts/clang/host/linux-x86/clang-r547379.tar.gz "https://github.com/topnotchfreaks/clang/releases/download/v1.0.0/clang-r547379.tar.gz"
-          mkdir -p prebuilts/clang/host/linux-x86/clang-r547379
-          tar -xzf prebuilts/clang/host/linux-x86/clang-r547379.tar.gz -C prebuilts/clang/host/linux-x86/clang-r547379
-          rm -rf prebuilts/clang/host/linux-x86/clang-r547379.tar.gz
-
-          rm -rf prebuilts/clang/host/linux-x86/clang-3289846
-          rm -rf prebuilts/clang/host/linux-x86/clang-r450784e
-          rm -rf prebuilts/clang/host/linux-x86/clang-stable
-          
-          sed -i \
-           -e 's/^BRANCH=.*/BRANCH=android13-5.15/' \
-           -e 's/^CLANG_VERSION=.*/CLANG_VERSION=r547379/' \
-           ${{ env.kernelDir }}/${{ env.kernelName }}/build.config.constants
-          
-          sed -i '/^DEFCONFIG=gki_defconfig/d' ${{ env.kernelDir }}/${{ env.kernelName }}/build.config.gki
-          sed -i '$a\DEFCONFIG=${{ env.DEFCONFIG_NAME }}' ${{ env.kernelDir }}/${{ env.kernelName }}/build.config.gki
-          sed -i '/^POST_DEFCONFIG_CMDS="check_defconfig"/d' ${{ env.kernelDir }}/${{ env.kernelName }}/build.config.gki
-
-          sed -i \
-           -e '/^KMI_SYMBOL_LIST_STRICT_MODE=/d' \
-           -e '/^TRIM_NONLISTED_KMI=/d' \
-           -e '/^KMI_ENFORCED=/d' \
-           -e '$a\KMI_SYMBOL_LIST_STRICT_MODE=0' \
-           -e '$a\TRIM_NONLISTED_KMI=0' \
-           -e '$a\KMI_ENFORCED=0' \
-           -e '/^MODULES_ORDER=/d' \
-           -e '/^MODULES_LIST=/d' \
-           ${{ env.kernelDir }}/${{ env.kernelName }}/build.config.gki.aarch64
-
-      - name: "⚙️ Configure kernel"
-        working-directory: ./${{ env.kernelDir }}/${{ env.kernelName }}
-        run: |
-          # Define the config file path
-          CONFIG_FILE="arch/arm64/configs/${{ env.DEFCONFIG_NAME }}"
+          # Apply research configurations
+          if [ "${{ github.event.inputs.researchMode }}" = "true" ]; then
+            echo "🔧 Applying research configurations..."
+            
+            # Memory access and debugging
+            ./scripts/config --enable DEBUG_FS
+            ./scripts/config --enable FTRACE
+            ./scripts/config --enable FTRACE_SYSCALLS
+            ./scripts/config --enable DEVMEM
+            ./scripts/config --disable STRICT_DEVMEM
+            ./scripts/config --enable KALLSYMS_ALL
+            ./scripts/config --enable KPROBES
+            ./scripts/config --enable UPROBES
+            
+            # Kernel debugging
+            ./scripts/config --enable KGDB
+            ./scripts/config --enable KGDB_SERIAL_CONSOLE
+            ./scripts/config --enable KGDB_KDB
+            
+            # Performance and profiling
+            ./scripts/config --enable PERF_EVENTS
+            ./scripts/config --enable HW_PERF_EVENTS
+            
+            # Module loading
+            ./scripts/config --disable MODULE_SIG
+            ./scripts/config --disable MODULE_SIG_FORCE
+            
+            # BPF for research
+            ./scripts/config --enable BPF
+            ./scripts/config --enable BPF_SYSCALL
+            ./scripts/config --enable BPF_JIT
+            
+            # Memory analysis
+            ./scripts/config --enable PROC_PID_MEM
+            ./scripts/config --enable PROC_KCORE
+            ./scripts/config --enable KEXEC
+            ./scripts/config --enable MAGIC_SYSRQ
+            
+            # Security research
+            ./scripts/config --disable SECURITY_SELINUX_DEVELOP
+            ./scripts/config --set-val SECURITY_SELINUX_CHECKREQPROT_VALUE 0
+            
+            # Debug info
+            ./scripts/config --enable DEBUG_INFO
+            ./scripts/config --enable DEBUG_INFO_DWARF5
+            ./scripts/config --enable DEBUG_KERNEL
+            
+            echo "✅ Research configurations applied"
+          else
+            echo "ℹ️ Using standard configuration"
+          fi
           
           # Set localversion
           if [ -n "${{ github.event.inputs.localVersion }}" ]; then
-            echo "CONFIG_LOCALVERSION=\"${{ github.event.inputs.localVersion }}\"" >> "$CONFIG_FILE"
+            echo "CONFIG_LOCALVERSION=\"${{ github.event.inputs.localVersion }}\"" >> .config
           fi
           
-          # Basic optimizations
-          echo "CONFIG_KALLSYMS=y" >> "$CONFIG_FILE"
+          # Finalize config
+          make ARCH=arm64 olddefconfig
+          
+          # Verify critical options
+          echo "🔍 Verifying research configurations:"
+          grep -E "DEBUG_FS|FTRACE_SYSCALLS|DEVMEM|KPROBES|KGDB" .config | head -10
 
-      - name: "🔧 Add BBG Support (KSU variant only)"
-        if: matrix.variant == 'ksu'
-        working-directory: ./${{ env.kernelDir }}/${{ env.kernelName }}
+      - name: "🔨 Build research kernel"
+        working-directory: ${{ env.KERNEL_DIR }}
         run: |
-          echo "Adding BBG..."
-          wget -O- https://github.com/vc-teahouse/Baseband-guard/raw/main/setup.sh | bash
-          echo "CONFIG_BBG=y" >> arch/arm64/configs/${{ env.DEFCONFIG_NAME }}
-          sed -i '/^config LSM$/,/^help$/{ /^[[:space:]]*default/ { /baseband_guard/! s/landlock/landlock,baseband_guard/ } }' security/Kconfig
-
-      - name: "🔧 Setup KernelSU (KSU variant only)"
-        if: matrix.variant == 'ksu'
-        working-directory: ./${{ env.kernelDir }}/${{ env.kernelName }}
-        run: |
-          rm -rf ./KernelSU ./drivers/kernelsu
+          export ARCH=arm64
+          export CROSS_COMPILE=aarch64-linux-gnu-
           
-          # Install KernelSU with SUSFS
-          curl -LSs "https://raw.githubusercontent.com/ShirkNeko/SukiSU-Ultra/main/kernel/setup.sh" | bash -s susfs-main
+          echo "🏗️ Starting kernel compilation..."
+          make -j$(nproc --all)
           
-          # Apply SUSFS patch
-          PATCH_URL="https://api.github.com/repos/topnotchfreaks/kernel_patches/releases/latest"
-          SUSFS_PATCH=$(curl -s "$PATCH_URL" | grep "browser_download_url.*0001-Implement-SUSFS.*Android-13.*Kernel-5.15.*patch" | cut -d '"' -f 4 | head -n 1)
-          
-          if [ -n "$SUSFS_PATCH" ]; then
-            curl -L -o susfs.patch "$SUSFS_PATCH"
-            patch -p1 < susfs.patch || echo "Warning: SUSFS patch failed"
+          # Verify build result
+          if [ -f "arch/arm64/boot/Image.gz" ]; then
+            echo "✅ Kernel compiled successfully!"
+            ls -la arch/arm64/boot/Image.gz
+          else
+            echo "❌ Kernel compilation failed!"
+            exit 1
           fi
+
+      - name: "📦 Create research package"
+        working-directory: ${{ env.KERNEL_DIR }}
+        run: |
+          mkdir -p anykernel_research/kernel
+          cp arch/arm64/boot/Image.gz anykernel_research/kernel/
           
-          # Hooks
-          curl -L -o hooks.patch \
-          https://raw.githubusercontent.com/topnotchfreaks/kernel_patches/main/scope_min_manual_hooks_v1.6.patch
-          patch -p1 < hooks.patch || echo "::warning::Hooks hunks failed"
-          rm -f hooks.patch
-          
-          # Add KSU configs
-          CONFIG_FILE="arch/arm64/configs/${{ env.DEFCONFIG_NAME }}"
-          cat >> "$CONFIG_FILE" << 'EOF'
-          CONFIG_KSU=y
-          CONFIG_KSU_MANUAL_HOOK=y
-          CONFIG_KPM=y
-          CONFIG_KSU_SUSFS=y
-          CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y
-          CONFIG_KSU_SUSFS_SUS_PATH=y
-          CONFIG_KSU_SUSFS_SUS_MOUNT=y
-          CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT=y
-          CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=y
-          CONFIG_KSU_SUSFS_SUS_KSTAT=y
-          CONFIG_KSU_SUSFS_SUS_OVERLAYFS=n
-          CONFIG_KSU_SUSFS_TRY_UMOUNT=y
-          CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT=y
-          CONFIG_KSU_SUSFS_SPOOF_UNAME=y
-          CONFIG_KSU_SUSFS_ENABLE_LOG=y
-          CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y
-          CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y
-          CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
-          CONFIG_KSU_SUSFS_SUS_SU=n
-          CONFIG_TMPFS_XATTR=y
-          CONFIG_TMPFS_POSIX_ACL=y
-          EOF
+          # Create research-focused anykernel script
+          cat > anykernel_research/anykernel.sh << 'EOF'
+#!/bin/bash
+#
+# Research Kernel Installer
+# Specialized for security research and bug bounty
 
-      - name: "🔨 Build kernel"
-        working-directory: ${{ env.WORK_DIR }}
-        run: |
-          LTO=${{ github.event.inputs.ltoMode }} \
-          BUILD_CONFIG=${{ env.kernelDir }}/${{ env.kernelName }}/build.config.gki.aarch64 \
-          build/build.sh -j$(nproc --all)
+device_compatible="topaz tapas sapphire sapphiren";
 
-      - name: "🩹 Apply KPM patch (KSU variant only)"
-        if: matrix.variant == 'ksu'
-        working-directory: ${{ env.WORK_DIR }}/out/dist
-        run: |
-          curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU_patch/refs/heads/main/kpm/patch_linux" -o patch
-          chmod +x patch
-          ./patch
-          mv oImage Image
+ui_print " "
+ui_print "🔬 RESEARCH KERNEL INSTALLATION"
+ui_print "=================================="
+ui_print " "
 
-      - name: "📦 Prepare artifact"
-        working-directory: ${{ env.WORK_DIR }}
-        run: |
-          cp out/dist/Image Image.${{ matrix.variant }}
+ui_print "⚡ Features enabled:"
+ui_print "  • Full memory access (/dev/mem)"
+ui_print "  • System call tracing (FTRACE)"
+ui_print "  • Kernel debugging (KGDB/KDB)"
+ui_print "  • Dynamic probes (KPROBES/UPROBES)"
+ui_print "  • Unsigned module loading"
+ui_print "  • BPF program support"
+ui_print "  • Process memory access"
+ui_print " "
 
-      - name: "📤 Upload kernel"
-        uses: actions/upload-artifact@v4
-        with:
-          name: kernel-${{ matrix.variant }}
-          path: ${{ env.WORK_DIR }}/Image.${{ matrix.variant }}
-          retention-days: 3
+ui_print "🔧 Installing research kernel..."
+dd if=/tmp/anykernel/kernel/Image.gz of=/dev/block/bootdevice/by-name/boot
 
-  Package-Kernels:
-    name: "📦 Package kernels"
-    runs-on: ubuntu-latest
-    needs: Build-Kernel
-    steps:
-      - name: "📥 Download artifacts"
-        uses: actions/download-artifact@v4
-        with:
-          path: ./kernels/
+ui_print " "
+ui_print "✅ Research kernel installed!"
+ui_print " "
+ui_print "⚠️  WARNING: This kernel has reduced security"
+ui_print "    features for research purposes."
+ui_print " "
+ui_print "🔍 Available research tools:"
+ui_print "  • cat /dev/mem"
+ui_print "  • echo g > /proc/sysrq-trigger"
+ui_print "  • perf record -a -g"
+ui_print "  • insmod custom_module.ko"
+ui_print " "
+EOF
 
-      - name: "📦 Create flashable ZIP"
-        run: |
-          BUILD_TIME=$(date +'%Y-%m-%d')
-          git clone --depth=1 https://github.com/topnotchfreaks/AnyKernel3 -b master AnyKernel3
-          
-          # Copy kernels
-          find kernels -name "Image.*" -exec cp {} AnyKernel3/ \;
+          chmod +x anykernel_research/anykernel.sh
           
           # Create ZIP
-          ZIP_NAME="Anykernel3_${{ github.event.inputs.kernelBranch }}_${BUILD_TIME}.zip"
-          cd AnyKernel3
-          zip -r9 "../$ZIP_NAME" * -x .git/*
+          cd anykernel_research
+          ZIP_NAME="ResearchKernel_${{ github.event.inputs.kernelConfig }}_${{ env.BUILD_TIME }}.zip"
+          zip -r9 "../$ZIP_NAME" .
           cd ..
+          
           echo "ZIP_PATH=$(pwd)/$ZIP_NAME" >> $GITHUB_ENV
           echo "ZIP_NAME=$ZIP_NAME" >> $GITHUB_ENV
+          
+          echo "📦 Package created: $ZIP_NAME"
+          ls -la $ZIP_NAME
 
-      - name: "📤 Upload final package"
+      - name: "📤 Upload research artifact"
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.ZIP_NAME }}
           path: ${{ env.ZIP_PATH }}
-          retention-days: 7
+          retention-days: 30
 
-      - name: "📱 Send to Telegram"
+      - name: "📊 Build report"
+        if: always()
+        run: |
+          echo " "
+          echo "🔬 RESEARCH KERNEL BUILD REPORT"
+          echo "================================"
+          echo " "
+          echo "📅 Build time: ${{ env.BUILD_TIME }}"
+          echo "🔧 Configuration: ${{ github.event.inputs.kernelConfig }}"
+          echo "🔬 Research mode: ${{ github.event.inputs.researchMode }}"
+          echo "🏷️ Local version: ${{ github.event.inputs.localVersion }}"
+          echo " "
+          
+          if [ -f "${{ env.ZIP_PATH }}" ]; then
+            echo "✅ BUILD SUCCESSFUL"
+            echo "📦 Artifact: ${{ env.ZIP_NAME }}"
+            echo " "
+            echo "🔍 Research features included:"
+            echo "  • Memory access: /dev/mem, /proc/pid/mem"
+            echo "  • Tracing: ftrace, kprobes, uprobes"
+            echo "  • Debugging: kgdb, kdb, debugfs"
+            echo "  • Profiling: perf events, hw perf"
+            echo "  • Modules: unsigned module loading"
+            echo "  • BPF: eBPF programs and JIT"
+            echo " "
+          else
+            echo "❌ BUILD FAILED"
+            echo " "
+          fi
+
+      - name: "📱 Notify build completion"
         if: always()
         run: |
           if [[ -f "${{ env.ZIP_PATH }}" ]]; then
-            curl -s -F document=@"${{ env.ZIP_PATH }}" \
-                 -F caption="✅ Kernel Build Complete - $(date '+%Y-%m-%d %H:%M:%S')" \
-                 -F chat_id=${{ secrets.TELEGRAM_USER_ID }} \
-                 "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendDocument"
+            echo "✅ Research kernel build completed successfully!"
+            # Add Telegram notification here if configured
           else
-            curl -s -X POST \
-                 -d chat_id=${{ secrets.TELEGRAM_USER_ID }} \
-                 -d text="❌ Kernel build failed" \
-                 "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage"
+            echo "❌ Research kernel build failed!"
+            exit 1
           fi
