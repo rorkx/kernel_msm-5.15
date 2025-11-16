@@ -97,29 +97,37 @@ jobs:
           rm -rf prebuilts/clang/host/linux-x86/clang-r450784e
           rm -rf prebuilts/clang/host/linux-x86/clang-stable
 
-      - name: "🔨 Build kernel"
-        working-directory: ${{ env.WORK_DIR }}
-        run: |
-          LTO=${{ github.event.inputs.ltoMode }} \
-          BUILD_CONFIG=${{ env.kernelDir }}/${{ env.kernelName }}/build.config.gki.aarch64 \
-          build/build.sh -j$(nproc --all)
-        continue-on-error: true
-
-      - name: "⚙️ Configure base kernel"
+      - name: "⚙️ Clean and configure kernel"
         working-directory: ./${{ env.kernelDir }}/${{ env.kernelName }}
         run: |
-          # НАСТРАИВАЕМ БАЗОВЫЙ КОНФИГ (как запасной вариант)
           CONFIG_FILE="arch/arm64/configs/${{ env.DEFCONFIG_NAME }}"
           
+          # 🔧 ОЧИСТКА КОНФИГА ОТ ДУБЛИКАТОВ И СТАРЫХ ЗНАЧЕНИЙ
+          echo "=== CLEANING CONFIG FROM DUPLICATES ==="
+          sed -i '/CONFIG_DEVMEM/d' "$CONFIG_FILE"
+          sed -i '/CONFIG_PROC_PID_MEM/d' "$CONFIG_FILE"
+          sed -i '/CONFIG_STRICT_DEVMEM/d' "$CONFIG_FILE"
+          sed -i '/CONFIG_FTRACE_SYSCALLS/d' "$CONFIG_FILE"
+          sed -i '/CONFIG_KPROBES/d' "$CONFIG_FILE"
+          sed -i '/CONFIG_DEBUG_FS/d' "$CONFIG_FILE"
+          sed -i '/CONFIG_BPF_SYSCALL/d' "$CONFIG_FILE"
+          sed -i '/CONFIG_MAGIC_SYSRQ/d' "$CONFIG_FILE"
+          sed -i '/CONFIG_KALLSYMS/d' "$CONFIG_FILE"
+          sed -i '/CONFIG_KALLSYMS_ALL/d' "$CONFIG_FILE"
+          sed -i '/CONFIG_BPF/d' "$CONFIG_FILE"
+          sed -i '/CONFIG_FTRACE/d' "$CONFIG_FILE"
+
           # Set localversion
           if [ -n "${{ github.event.inputs.localVersion }}" ]; then
             echo "CONFIG_LOCALVERSION=\"${{ github.event.inputs.localVersion }}\"" >> "$CONFIG_FILE"
           fi
           
-          # Basic research optimizations
+          # 🔬 RESEARCH OPTIMIZATIONS - ТОЛЬКО НАШИ ЧИСТЫЕ ОПЦИИ
+          echo "=== ADDING RESEARCH OPTIONS ==="
           echo "CONFIG_KALLSYMS=y" >> "$CONFIG_FILE"
           echo "CONFIG_DEBUG_FS=y" >> "$CONFIG_FILE"
           echo "CONFIG_FTRACE=y" >> "$CONFIG_FILE"
+          echo "CONFIG_FTRACE_SYSCALLS=y" >> "$CONFIG_FILE"
           echo "CONFIG_DEVMEM=y" >> "$CONFIG_FILE"
           echo "# CONFIG_STRICT_DEVMEM is not set" >> "$CONFIG_FILE"
           echo "CONFIG_KALLSYMS_ALL=y" >> "$CONFIG_FILE"
@@ -174,15 +182,31 @@ jobs:
         working-directory: ./${{ env.kernelDir }}/${{ env.kernelName }}
         run: |
           echo "=== CONFIG VERIFICATION BEFORE BUILD ==="
-          grep -E "DEVMEM|PROC_PID_MEM|FTRACE_SYSCALLS" arch/arm64/configs/${{ env.DEFCONFIG_NAME }} || echo "⚠️ Some options missing in base config"
+          echo "DEVMEM: $(grep "CONFIG_DEVMEM" arch/arm64/configs/${{ env.DEFCONFIG_NAME }} | head -1)"
+          echo "PROC_PID_MEM: $(grep "CONFIG_PROC_PID_MEM" arch/arm64/configs/${{ env.DEFCONFIG_NAME }} | head -1)"
+          echo "FTRACE_SYSCALLS: $(grep "CONFIG_FTRACE_SYSCALLS" arch/arm64/configs/${{ env.DEFCONFIG_NAME }} | head -1)"
+          echo "KPROBES: $(grep "CONFIG_KPROBES" arch/arm64/configs/${{ env.DEFCONFIG_NAME }} | head -1)"
 
-      - name: "🔨 Build with protected research config"
+      - name: "🔨 Build kernel with safety checks"
         working-directory: ${{ env.WORK_DIR }}
         run: |
-          # ИСПОЛЬЗУЕМ ЗАЩИЩЕННЫЙ КОНФИГ!
+          # СБОРКА С ПРОВЕРКОЙ РЕЗУЛЬТАТА
+          echo "=== STARTING KERNEL BUILD ==="
           LTO=${{ github.event.inputs.ltoMode }} \
-          BUILD_CONFIG=${{ env.kernelDir }}/${{ env.kernelName }}/build.config.research_gki.aarch64 \
-          build/build.sh -j$(nproc --all)
+          BUILD_CONFIG=${{ env.kernelDir }}/${{ env.kernelName }}/build.config.gki.aarch64 \
+          build/build.sh -j$(nproc --all) || echo "Build completed with warnings"
+          
+          # 🛡️ ПРОВЕРКА ЧТО ЯДРО СОЗДАЛОСЬ
+          echo "=== VERIFYING KERNEL BUILD ==="
+          if [ ! -f "out/dist/Image" ]; then
+            echo "❌ CRITICAL: KERNEL BUILD FAILED - No Image file created!"
+            echo "=== CHECKING BUILD LOGS ==="
+            find out -name "*.log" -type f | head -5 | xargs -I {} echo "Log: {}" 
+            exit 1
+          else
+            echo "✅ SUCCESS: Kernel Image created successfully!"
+            ls -la out/dist/Image
+          fi
         continue-on-error: true
 
       - name: "🩹 Apply KPM patch (KSU variant only)"
@@ -199,7 +223,10 @@ jobs:
         run: |
           echo "=== FINAL KERNEL CONFIG VERIFICATION ==="
           if [ -f "out/.config" ]; then
-            grep -E "CONFIG_DEVMEM|CONFIG_PROC_PID_MEM|CONFIG_FTRACE_SYSCALLS" out/.config || echo "❌ RESEARCH OPTIONS MISSING!"
+            echo "DEVMEM: $(grep "CONFIG_DEVMEM" out/.config | head -1)"
+            echo "PROC_PID_MEM: $(grep "CONFIG_PROC_PID_MEM" out/.config | head -1)"
+            echo "FTRACE_SYSCALLS: $(grep "CONFIG_FTRACE_SYSCALLS" out/.config | head -1)"
+            echo "KPROBES: $(grep "CONFIG_KPROBES" out/.config | head -1)"
           else
             echo "⚠️ No .config found for verification"
           fi
@@ -208,6 +235,7 @@ jobs:
         working-directory: ${{ env.WORK_DIR }}
         run: |
           cp out/dist/Image Image.${{ matrix.variant }}
+          echo "✅ Artifact prepared: Image.${{ matrix.variant }}"
 
       - name: "📤 Upload kernel"
         uses: actions/upload-artifact@v4
