@@ -97,52 +97,13 @@ jobs:
           rm -rf prebuilts/clang/host/linux-x86/clang-r450784e
           rm -rf prebuilts/clang/host/linux-x86/clang-stable
 
-      - name: "🛡️ Create protected build config"
-        working-directory: ./${{ env.kernelDir }}/${{ env.kernelName }}
+      - name: "🔨 Build kernel"
+        working-directory: ${{ env.WORK_DIR }}
         run: |
-          # СОЗДАЕМ ЗАЩИЩЕННЫЙ BUILD CONFIG
-          cat > build.config.research_gki.aarch64 << 'EOF'
-          # =========================================
-          # 🔬 RESEARCH KERNEL BUILD CONFIG
-          # PROTECTED FROM OVERWRITES!
-          # =========================================
-          
-          # Base config
-          . build.config.gki.aarch64
-          
-          # DISABLE ALL CONFIG CLEANING/OVERWRITES
-          POST_DEFCONFIG_CMDS=""
-          POST_KMI_SYMBOL_LIST_CMDS=""
-          
-          # FORCE OUR RESEARCH OPTIONS IN FINAL CONFIG
-          EXTRA_CMDS="
-          echo '🔒 FORCING RESEARCH CONFIG OPTIONS...'
-          # 🛡️ MEMORY ACCESS
-          echo 'CONFIG_DEVMEM=y' >> \$OUT_DIR/.config
-          echo '# CONFIG_STRICT_DEVMEM is not set' >> \$OUT_DIR/.config
-          echo 'CONFIG_PROC_PID_MEM=y' >> \$OUT_DIR/.config
-          
-          # 🔬 KERNEL TRACING
-          echo 'CONFIG_KPROBES=y' >> \$OUT_DIR/.config
-          echo 'CONFIG_FTRACE=y' >> \$OUT_DIR/.config
-          echo 'CONFIG_FTRACE_SYSCALLS=y' >> \$OUT_DIR/.config
-          
-          # 📊 BPF SYSTEM
-          echo 'CONFIG_BPF=y' >> \$OUT_DIR/.config
-          echo 'CONFIG_BPF_SYSCALL=y' >> \$OUT_DIR/.config
-          
-          # 🔍 DEBUGGING
-          echo 'CONFIG_DEBUG_FS=y' >> \$OUT_DIR/.config
-          echo 'CONFIG_DEBUG_FS_ALLOW_ALL=y' >> \$OUT_DIR/.config
-          echo 'CONFIG_KALLSYMS=y' >> \$OUT_DIR/.config
-          echo 'CONFIG_KALLSYMS_ALL=y' >> \$OUT_DIR/.config
-          
-          # ⚡ SYSTEM CONTROL
-          echo 'CONFIG_MAGIC_SYSRQ=y' >> \$OUT_DIR/.config
-          
-          echo '✅ RESEARCH CONFIG APPLIED!'
-          "
-          EOF
+          LTO=${{ github.event.inputs.ltoMode }} \
+          BUILD_CONFIG=${{ env.kernelDir }}/${{ env.kernelName }}/build.config.gki.aarch64 \
+          build/build.sh -j$(nproc --all)
+        continue-on-error: true
 
       - name: "⚙️ Configure base kernel"
         working-directory: ./${{ env.kernelDir }}/${{ env.kernelName }}
