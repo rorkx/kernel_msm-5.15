@@ -37,11 +37,11 @@ on:
 
 jobs:
   Build-Research-Kernel:
-    name: "🔬 Build Research Kernel"
+    name: "Build Research Kernel"
     runs-on: ubuntu-latest
     
     steps:
-      - name: "🛠️ Setup build environment"
+      - name: "Setup build environment"
         run: |
           echo "BUILD_TIME=$(date +'%Y-%m-%d')" >> $GITHUB_ENV
           sudo apt-get update -qq
@@ -56,14 +56,14 @@ jobs:
           echo "vm.swappiness=60" | sudo tee -a /etc/sysctl.conf
           sudo sysctl -p
 
-      - name: "📥 Clone research kernel"
+      - name: "Clone research kernel"
         run: |
           git clone --recursive --branch ${{ github.event.inputs.kernelBranch }} \
             ${{ github.event.inputs.kernelSourceURL }} kernel-source --depth=1
           cd kernel-source
           echo "KERNEL_DIR=$(pwd)" >> $GITHUB_ENV
 
-      - name: "⚙️ Configure research kernel"
+      - name: "Configure research kernel"
         working-directory: ${{ env.KERNEL_DIR }}
         run: |
           # Create base config
@@ -71,7 +71,7 @@ jobs:
           
           # Apply research configurations
           if [ "${{ github.event.inputs.researchMode }}" = "true" ]; then
-            echo "🔧 Applying research configurations..."
+            echo "Applying research configurations..."
             
             # Memory access and debugging
             ./scripts/config --enable DEBUG_FS
@@ -116,9 +116,9 @@ jobs:
             ./scripts/config --enable DEBUG_INFO_DWARF5
             ./scripts/config --enable DEBUG_KERNEL
             
-            echo "✅ Research configurations applied"
+            echo "Research configurations applied"
           else
-            echo "ℹ️ Using standard configuration"
+            echo "Using standard configuration"
           fi
           
           # Set localversion
@@ -130,72 +130,63 @@ jobs:
           make ARCH=arm64 olddefconfig
           
           # Verify critical options
-          echo "🔍 Verifying research configurations:"
+          echo "Verifying research configurations:"
           grep -E "DEBUG_FS|FTRACE_SYSCALLS|DEVMEM|KPROBES|KGDB" .config | head -10
 
-      - name: "🔨 Build research kernel"
+      - name: "Build research kernel"
         working-directory: ${{ env.KERNEL_DIR }}
         run: |
           export ARCH=arm64
           export CROSS_COMPILE=aarch64-linux-gnu-
           
-          echo "🏗️ Starting kernel compilation..."
+          echo "Starting kernel compilation..."
           make -j$(nproc --all)
           
           # Verify build result
           if [ -f "arch/arm64/boot/Image.gz" ]; then
-            echo "✅ Kernel compiled successfully!"
+            echo "Kernel compiled successfully!"
             ls -la arch/arm64/boot/Image.gz
           else
-            echo "❌ Kernel compilation failed!"
+            echo "Kernel compilation failed!"
             exit 1
           fi
 
-      - name: "📦 Create research package"
+      - name: "Create research package"
         working-directory: ${{ env.KERNEL_DIR }}
         run: |
           mkdir -p anykernel_research/kernel
           cp arch/arm64/boot/Image.gz anykernel_research/kernel/
           
-          # Create research-focused anykernel script
+          # Create research-focused anykernel script (FIXED VERSION)
           cat > anykernel_research/anykernel.sh << 'EOF'
 #!/bin/bash
-#
-# Research Kernel Installer
-# Specialized for security research and bug bounty
 
 device_compatible="topaz tapas sapphire sapphiren";
 
-ui_print " "
-ui_print "🔬 RESEARCH KERNEL INSTALLATION"
-ui_print "=================================="
-ui_print " "
+ui_print " ";
+ui_print "RESEARCH KERNEL INSTALLATION";
+ui_print "==================================";
+ui_print " ";
 
-ui_print "⚡ Features enabled:"
-ui_print "  • Full memory access (/dev/mem)"
-ui_print "  • System call tracing (FTRACE)"
-ui_print "  • Kernel debugging (KGDB/KDB)"
-ui_print "  • Dynamic probes (KPROBES/UPROBES)"
-ui_print "  • Unsigned module loading"
-ui_print "  • BPF program support"
-ui_print "  • Process memory access"
-ui_print " "
+ui_print "Features enabled:";
+ui_print "  - Full memory access (/dev/mem)";
+ui_print "  - System call tracing (FTRACE)";
+ui_print "  - Kernel debugging (KGDB/KDB)";
+ui_print "  - Dynamic probes (KPROBES/UPROBES)";
+ui_print "  - Unsigned module loading";
+ui_print "  - BPF program support";
+ui_print "  - Process memory access";
+ui_print " ";
 
-ui_print "🔧 Installing research kernel..."
-dd if=/tmp/anykernel/kernel/Image.gz of=/dev/block/bootdevice/by-name/boot
+ui_print "Installing research kernel...";
+dd if=/tmp/anykernel/kernel/Image.gz of=/dev/block/bootdevice/by-name/boot;
 
-ui_print " "
-ui_print "✅ Research kernel installed!"
-ui_print " "
-ui_print "⚠️  WARNING: This kernel has reduced security"
-ui_print "    features for research purposes."
-ui_print " "
-ui_print "🔍 Available research tools:"
-ui_print "  • cat /dev/mem"
-ui_print "  • echo g > /proc/sysrq-trigger"
-ui_print "  • perf record -a -g"
-ui_print "  • insmod custom_module.ko"
-ui_print " "
+ui_print " ";
+ui_print "Research kernel installed!";
+ui_print " ";
+ui_print "WARNING: This kernel has reduced security";
+ui_print "features for research purposes.";
+ui_print " ";
 EOF
 
           chmod +x anykernel_research/anykernel.sh
@@ -209,53 +200,42 @@ EOF
           echo "ZIP_PATH=$(pwd)/$ZIP_NAME" >> $GITHUB_ENV
           echo "ZIP_NAME=$ZIP_NAME" >> $GITHUB_ENV
           
-          echo "📦 Package created: $ZIP_NAME"
+          echo "Package created: $ZIP_NAME"
           ls -la $ZIP_NAME
 
-      - name: "📤 Upload research artifact"
+      - name: "Upload research artifact"
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.ZIP_NAME }}
           path: ${{ env.ZIP_PATH }}
           retention-days: 30
 
-      - name: "📊 Build report"
+      - name: "Build report"
         if: always()
         run: |
           echo " "
-          echo "🔬 RESEARCH KERNEL BUILD REPORT"
+          echo "RESEARCH KERNEL BUILD REPORT"
           echo "================================"
           echo " "
-          echo "📅 Build time: ${{ env.BUILD_TIME }}"
-          echo "🔧 Configuration: ${{ github.event.inputs.kernelConfig }}"
-          echo "🔬 Research mode: ${{ github.event.inputs.researchMode }}"
-          echo "🏷️ Local version: ${{ github.event.inputs.localVersion }}"
+          echo "Build time: ${{ env.BUILD_TIME }}"
+          echo "Configuration: ${{ github.event.inputs.kernelConfig }}"
+          echo "Research mode: ${{ github.event.inputs.researchMode }}"
+          echo "Local version: ${{ github.event.inputs.localVersion }}"
           echo " "
           
           if [ -f "${{ env.ZIP_PATH }}" ]; then
-            echo "✅ BUILD SUCCESSFUL"
-            echo "📦 Artifact: ${{ env.ZIP_NAME }}"
+            echo "BUILD SUCCESSFUL"
+            echo "Artifact: ${{ env.ZIP_NAME }}"
             echo " "
-            echo "🔍 Research features included:"
-            echo "  • Memory access: /dev/mem, /proc/pid/mem"
-            echo "  • Tracing: ftrace, kprobes, uprobes"
-            echo "  • Debugging: kgdb, kdb, debugfs"
-            echo "  • Profiling: perf events, hw perf"
-            echo "  • Modules: unsigned module loading"
-            echo "  • BPF: eBPF programs and JIT"
+            echo "Research features included:"
+            echo "  - Memory access: /dev/mem, /proc/pid/mem"
+            echo "  - Tracing: ftrace, kprobes, uprobes"
+            echo "  - Debugging: kgdb, kdb, debugfs"
+            echo "  - Profiling: perf events, hw perf"
+            echo "  - Modules: unsigned module loading"
+            echo "  - BPF: eBPF programs and JIT"
             echo " "
           else
-            echo "❌ BUILD FAILED"
+            echo "BUILD FAILED"
             echo " "
-          fi
-
-      - name: "📱 Notify build completion"
-        if: always()
-        run: |
-          if [[ -f "${{ env.ZIP_PATH }}" ]]; then
-            echo "✅ Research kernel build completed successfully!"
-            # Add Telegram notification here if configured
-          else
-            echo "❌ Research kernel build failed!"
-            exit 1
           fi
