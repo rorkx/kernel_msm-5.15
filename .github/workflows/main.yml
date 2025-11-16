@@ -97,34 +97,49 @@ jobs:
           rm -rf prebuilts/clang/host/linux-x86/clang-r450784e
           rm -rf prebuilts/clang/host/linux-x86/clang-stable
 
-      - name: "🔧 Setup compiler symlinks"
+      - name: "🔧 Setup compiler and protect config"
         working-directory: ${{ env.WORK_DIR }}
         run: |
           echo "=== CREATING COMPILER SYMLINKS ==="
           
-          # Переходим в директорию с компилятором
+          # Настройка компилятора
           cd prebuilts/clang/host/linux-x86/clang-r547379/bin
-          
-          # Создаем симлинки которые ожидает build system
-          # Находим реальные файлы компилятора
           CLANG_BIN=$(find . -name "clang*" -type f | grep -v "\.tar" | head -1)
           LLVM_AR_BIN=$(find . -name "llvm-ar*" -type f | head -1)
           LLVM_NM_BIN=$(find . -name "llvm-nm*" -type f | head -1)
           
-          echo "Found compiler: $CLANG_BIN"
-          
-          # Создаем стандартные симлинки
           ln -sf "$(basename "$CLANG_BIN")" clang
           ln -sf "$(basename "$CLANG_BIN")" clang++
           ln -sf "$(basename "$LLVM_AR_BIN")" llvm-ar
           ln -sf "$(basename "$LLVM_NM_BIN")" llvm-nm
           
-          # Проверяем
-          echo "=== SYMLINKS CREATED ==="
-          ls -la clang* llvm* | head -10
-          
-          # Добавляем в PATH
           echo "$(pwd)" >> $GITHUB_PATH
+      
+      - name: "🛡️ Protect research config from overwrites"
+        working-directory: ./${{ env.kernelDir }}/${{ env.kernelName }}
+        run: |
+          echo "=== PROTECTING RESEARCH CONFIG ==="
+          
+          # 🔧 НАСТРОЙКА BUILD SYSTEM
+          sed -i \
+           -e 's/^BRANCH=.*/BRANCH=android13-5.15/' \
+           -e 's/^CLANG_VERSION=.*/CLANG_VERSION=r547379/' \
+           build.config.constants
+      
+          # 🛡️ ОТКЛЮЧЕНИЕ KMI ЗАЩИТ
+          sed -i \
+           -e '/^KMI_SYMBOL_LIST_STRICT_MODE=/d' \
+           -e '/^TRIM_NONLISTED_KMI=/d' \
+           -e '/^KMI_ENFORCED=/d' \
+           -e '$a\KMI_SYMBOL_LIST_STRICT_MODE=0' \
+           -e '$a\TRIM_NONLISTED_KMI=0' \
+           -e '$a\KMI_ENFORCED=0' \
+           build.config.gki.aarch64
+      
+          # 🚫 ОТКЛЮЧЕНИЕ ОЧИСТКИ КОНФИГА
+          sed -i '/^POST_DEFCONFIG_CMDS="check_defconfig"/d' build.config.gki
+          
+          echo "✅ Research config protection applied!"
 
   
       - name: "⚙️ Clean and configure kernel"
