@@ -96,25 +96,27 @@ jobs:
           rm -rf prebuilts/clang/host/linux-x86/clang-3289846
           rm -rf prebuilts/clang/host/linux-x86/clang-r450784e
           rm -rf prebuilts/clang/host/linux-x86/clang-stable
+          
+          # 🔧 ВАЖНО: НАСТРОЙКА BUILD CONFIG (защита от перезаписи)
+          sed -i \
+           -e 's/^BRANCH=.*/BRANCH=android13-5.15/' \
+           -e 's/^CLANG_VERSION=.*/CLANG_VERSION=r547379/' \
+           ${{ env.kernelDir }}/${{ env.kernelName }}/build.config.constants
+          
+          sed -i '/^DEFCONFIG=gki_defconfig/d' ${{ env.kernelDir }}/${{ env.kernelName }}/build.config.gki
+          sed -i '$a\DEFCONFIG=${{ env.DEFCONFIG_NAME }}' ${{ env.kernelDir }}/${{ env.kernelName }}/build.config.gki
+          sed -i '/^POST_DEFCONFIG_CMDS="check_defconfig"/d' ${{ env.kernelDir }}/${{ env.kernelName }}/build.config.gki
+          sed -i \
+           -e '/^KMI_SYMBOL_LIST_STRICT_MODE=/d' \
+           -e '/^TRIM_NONLISTED_KMI=/d' \
+           -e '/^KMI_ENFORCED=/d' \
+           -e '$a\KMI_SYMBOL_LIST_STRICT_MODE=0' \
+           -e '$a\TRIM_NONLISTED_KMI=0' \
+           -e '$a\KMI_ENFORCED=0' \
+           -e '/^MODULES_ORDER=/d' \
+           -e '/^MODULES_LIST=/d' \
+           ${{ env.kernelDir }}/${{ env.kernelName }}/build.config.gki.aarch64
 
-      - name: "🔧 Setup compiler and protect config"
-        working-directory: ${{ env.WORK_DIR }}
-        run: |
-          echo "=== CREATING COMPILER SYMLINKS ==="
-          
-          # Настройка компилятора
-          cd prebuilts/clang/host/linux-x86/clang-r547379/bin
-          CLANG_BIN=$(find . -name "clang*" -type f | grep -v "\.tar" | head -1)
-          LLVM_AR_BIN=$(find . -name "llvm-ar*" -type f | head -1)
-          LLVM_NM_BIN=$(find . -name "llvm-nm*" -type f | head -1)
-          
-          ln -sf "$(basename "$CLANG_BIN")" clang
-          ln -sf "$(basename "$CLANG_BIN")" clang++
-          ln -sf "$(basename "$LLVM_AR_BIN")" llvm-ar
-          ln -sf "$(basename "$LLVM_NM_BIN")" llvm-nm
-          
-          echo "$(pwd)" >> $GITHUB_PATH
-      
       - name: "🛡️ Protect research config from overwrites"
         working-directory: ./${{ env.kernelDir }}/${{ env.kernelName }}
         run: |
