@@ -97,6 +97,36 @@ jobs:
           rm -rf prebuilts/clang/host/linux-x86/clang-r450784e
           rm -rf prebuilts/clang/host/linux-x86/clang-stable
 
+      - name: "🔧 Setup compiler symlinks"
+        working-directory: ${{ env.WORK_DIR }}
+        run: |
+          echo "=== CREATING COMPILER SYMLINKS ==="
+          
+          # Переходим в директорию с компилятором
+          cd prebuilts/clang/host/linux-x86/clang-r547379/bin
+          
+          # Создаем симлинки которые ожидает build system
+          # Находим реальные файлы компилятора
+          CLANG_BIN=$(find . -name "clang*" -type f | grep -v "\.tar" | head -1)
+          LLVM_AR_BIN=$(find . -name "llvm-ar*" -type f | head -1)
+          LLVM_NM_BIN=$(find . -name "llvm-nm*" -type f | head -1)
+          
+          echo "Found compiler: $CLANG_BIN"
+          
+          # Создаем стандартные симлинки
+          ln -sf "$(basename "$CLANG_BIN")" clang
+          ln -sf "$(basename "$CLANG_BIN")" clang++
+          ln -sf "$(basename "$LLVM_AR_BIN")" llvm-ar
+          ln -sf "$(basename "$LLVM_NM_BIN")" llvm-nm
+          
+          # Проверяем
+          echo "=== SYMLINKS CREATED ==="
+          ls -la clang* llvm* | head -10
+          
+          # Добавляем в PATH
+          echo "$(pwd)" >> $GITHUB_PATH
+
+  
       - name: "⚙️ Clean and configure kernel"
         working-directory: ./${{ env.kernelDir }}/${{ env.kernelName }}
         run: |
