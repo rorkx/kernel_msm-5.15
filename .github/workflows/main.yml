@@ -1,4 +1,4 @@
-name: "Build kernels"
+name: "Build Research Kernel"
 
 env:
   OUT_DIR: "out"
@@ -44,7 +44,7 @@ on:
 
 jobs:
   Build-Kernel:
-    name: "🚀 Build Kernel"
+    name: "🚀 Build Research Kernel"
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -74,11 +74,13 @@ jobs:
           sudo swapon /swapfile
           echo "vm.swappiness=60" | sudo tee -a /etc/sysctl.conf
           sudo sysctl -p
+
       - name: "🌟 Clone kernel source"
         working-directory: ./${{ env.kernelDir }}
         run: |
           git clone --recursive --branch ${{ github.event.inputs.kernelBranch }} \
             ${{ github.event.inputs.kernelSourceURL }} ${{ env.kernelName }} --depth=1
+
       - name: "📥 Initialize repo"
         working-directory: ${{ env.WORK_DIR}}
         run: |
@@ -94,29 +96,58 @@ jobs:
           rm -rf prebuilts/clang/host/linux-x86/clang-3289846
           rm -rf prebuilts/clang/host/linux-x86/clang-r450784e
           rm -rf prebuilts/clang/host/linux-x86/clang-stable
-          
-          sed -i \
-           -e 's/^BRANCH=.*/BRANCH=android13-5.15/' \
-           -e 's/^CLANG_VERSION=.*/CLANG_VERSION=r547379/' \
-           ${{ env.kernelDir }}/${{ env.kernelName }}/build.config.constants
-          
-          sed -i '/^DEFCONFIG=gki_defconfig/d' ${{ env.kernelDir }}/${{ env.kernelName }}/build.config.gki
-          sed -i '$a\DEFCONFIG=${{ env.DEFCONFIG_NAME }}' ${{ env.kernelDir }}/${{ env.kernelName }}/build.config.gki
-          sed -i '/^POST_DEFCONFIG_CMDS="check_defconfig"/d' ${{ env.kernelDir }}/${{ env.kernelName }}/build.config.gki
-          sed -i \
-           -e '/^KMI_SYMBOL_LIST_STRICT_MODE=/d' \
-           -e '/^TRIM_NONLISTED_KMI=/d' \
-           -e '/^KMI_ENFORCED=/d' \
-           -e '$a\KMI_SYMBOL_LIST_STRICT_MODE=0' \
-           -e '$a\TRIM_NONLISTED_KMI=0' \
-           -e '$a\KMI_ENFORCED=0' \
-           -e '/^MODULES_ORDER=/d' \
-           -e '/^MODULES_LIST=/d' \
-           ${{ env.kernelDir }}/${{ env.kernelName }}/build.config.gki.aarch64
-      - name: "⚙️ Configure kernel"
+
+      - name: "🛡️ Create protected build config"
         working-directory: ./${{ env.kernelDir }}/${{ env.kernelName }}
         run: |
-          # Define the config file path
+          # СОЗДАЕМ ЗАЩИЩЕННЫЙ BUILD CONFIG
+          cat > build.config.research_gki.aarch64 << 'EOF'
+          # =========================================
+          # 🔬 RESEARCH KERNEL BUILD CONFIG
+          # PROTECTED FROM OVERWRITES!
+          # =========================================
+          
+          # Base config
+          . build.config.gki.aarch64
+          
+          # DISABLE ALL CONFIG CLEANING/OVERWRITES
+          POST_DEFCONFIG_CMDS=""
+          POST_KMI_SYMBOL_LIST_CMDS=""
+          
+          # FORCE OUR RESEARCH OPTIONS IN FINAL CONFIG
+          EXTRA_CMDS="
+          echo '🔒 FORCING RESEARCH CONFIG OPTIONS...'
+          # 🛡️ MEMORY ACCESS
+          echo 'CONFIG_DEVMEM=y' >> \$OUT_DIR/.config
+          echo '# CONFIG_STRICT_DEVMEM is not set' >> \$OUT_DIR/.config
+          echo 'CONFIG_PROC_PID_MEM=y' >> \$OUT_DIR/.config
+          
+          # 🔬 KERNEL TRACING
+          echo 'CONFIG_KPROBES=y' >> \$OUT_DIR/.config
+          echo 'CONFIG_FTRACE=y' >> \$OUT_DIR/.config
+          echo 'CONFIG_FTRACE_SYSCALLS=y' >> \$OUT_DIR/.config
+          
+          # 📊 BPF SYSTEM
+          echo 'CONFIG_BPF=y' >> \$OUT_DIR/.config
+          echo 'CONFIG_BPF_SYSCALL=y' >> \$OUT_DIR/.config
+          
+          # 🔍 DEBUGGING
+          echo 'CONFIG_DEBUG_FS=y' >> \$OUT_DIR/.config
+          echo 'CONFIG_DEBUG_FS_ALLOW_ALL=y' >> \$OUT_DIR/.config
+          echo 'CONFIG_KALLSYMS=y' >> \$OUT_DIR/.config
+          echo 'CONFIG_KALLSYMS_ALL=y' >> \$OUT_DIR/.config
+          
+          # ⚡ SYSTEM CONTROL
+          echo 'CONFIG_MAGIC_SYSRQ=y' >> \$OUT_DIR/.config
+          
+          echo '✅ RESEARCH CONFIG APPLIED!'
+          "
+          EOF
+
+      - name: "⚙️ Configure base kernel"
+        working-directory: ./${{ env.kernelDir }}/${{ env.kernelName }}
+        run: |
+          # НАСТРАИВАЕМ БАЗОВЫЙ КОНФИГ (как запасной вариант)
           CONFIG_FILE="arch/arm64/configs/${{ env.DEFCONFIG_NAME }}"
           
           # Set localversion
@@ -124,9 +155,7 @@ jobs:
             echo "CONFIG_LOCALVERSION=\"${{ github.event.inputs.localVersion }}\"" >> "$CONFIG_FILE"
           fi
           
-          # Basic optimizations
-          echo "CONFIG_KALLSYMS=y" >> "$CONFIG_FILE"
-
+          # Basic research optimizations
           echo "CONFIG_KALLSYMS=y" >> "$CONFIG_FILE"
           echo "CONFIG_DEBUG_FS=y" >> "$CONFIG_FILE"
           echo "CONFIG_FTRACE=y" >> "$CONFIG_FILE"
@@ -137,6 +166,7 @@ jobs:
           echo "CONFIG_PROC_PID_MEM=y" >> "$CONFIG_FILE"
           echo "CONFIG_BPF=y" >> "$CONFIG_FILE"
           echo "CONFIG_BPF_SYSCALL=y" >> "$CONFIG_FILE"
+          echo "CONFIG_MAGIC_SYSRQ=y" >> "$CONFIG_FILE"
 
       - name: "🔧 Add BBG Support (KSU variant only)"
         if: matrix.variant == 'ksu'
@@ -145,30 +175,13 @@ jobs:
           echo "Adding BBG..."
           wget -O- https://github.com/vc-teahouse/Baseband-guard/raw/main/setup.sh | bash
           echo "CONFIG_BBG=y" >> arch/arm64/configs/${{ env.DEFCONFIG_NAME }}
-          sed -i '/^config LSM$/,/^help$/{ /^[[:space:]]*default/ { /baseband_guard/! s/landlock/landlock,baseband_guard/ } }' security/Kconfig
+
       - name: "🔧 Setup KernelSU (KSU variant only)"
         if: matrix.variant == 'ksu'
         working-directory: ./${{ env.kernelDir }}/${{ env.kernelName }}
         run: |
           rm -rf ./KernelSU ./drivers/kernelsu
-          
-          # Install KernelSU with SUSFS
           curl -LSs "https://raw.githubusercontent.com/ShirkNeko/SukiSU-Ultra/main/kernel/setup.sh" | bash -s susfs-main
-          
-          # Apply SUSFS patch
-          PATCH_URL="https://api.github.com/repos/topnotchfreaks/kernel_patches/releases/latest"
-          SUSFS_PATCH=$(curl -s "$PATCH_URL" | grep "browser_download_url.*0001-Implement-SUSFS.*Android-13.*Kernel-5.15.*patch" | cut -d '"' -f 4 | head -n 1)
-          
-          if [ -n "$SUSFS_PATCH" ]; then
-            curl -L -o susfs.patch "$SUSFS_PATCH"
-            patch -p1 < susfs.patch || echo "Warning: SUSFS patch failed"
-          fi
-          
-          # Hooks
-          curl -L -o hooks.patch \
-          https://raw.githubusercontent.com/topnotchfreaks/kernel_patches/main/scope_min_manual_hooks_v1.6.patch
-          patch -p1 < hooks.patch || echo "::warning::Hooks hunks failed"
-          rm -f hooks.patch
           
           # Add KSU configs
           CONFIG_FILE="arch/arm64/configs/${{ env.DEFCONFIG_NAME }}"
@@ -195,14 +208,22 @@ jobs:
           CONFIG_TMPFS_XATTR=y
           CONFIG_TMPFS_POSIX_ACL=y
           EOF
-      - name: "🔨 Build kernel"
+
+      - name: "🔍 Verify config before build"
+        working-directory: ./${{ env.kernelDir }}/${{ env.kernelName }}
+        run: |
+          echo "=== CONFIG VERIFICATION BEFORE BUILD ==="
+          grep -E "DEVMEM|PROC_PID_MEM|FTRACE_SYSCALLS" arch/arm64/configs/${{ env.DEFCONFIG_NAME }} || echo "⚠️ Some options missing in base config"
+
+      - name: "🔨 Build with protected research config"
         working-directory: ${{ env.WORK_DIR }}
         run: |
+          # ИСПОЛЬЗУЕМ ЗАЩИЩЕННЫЙ КОНФИГ!
           LTO=${{ github.event.inputs.ltoMode }} \
-          BUILD_CONFIG=${{ env.kernelDir }}/${{ env.kernelName }}/build.config.gki.aarch64 \
+          BUILD_CONFIG=${{ env.kernelDir }}/${{ env.kernelName }}/build.config.research_gki.aarch64 \
           build/build.sh -j$(nproc --all)
-        continue-on-error: true  
-        
+        continue-on-error: true
+
       - name: "🩹 Apply KPM patch (KSU variant only)"
         if: matrix.variant == 'ksu'
         working-directory: ${{ env.WORK_DIR }}/out/dist
@@ -211,10 +232,22 @@ jobs:
           chmod +x patch
           ./patch
           mv oImage Image
+
+      - name: "🔎 Verify final kernel config"
+        working-directory: ${{ env.WORK_DIR }}
+        run: |
+          echo "=== FINAL KERNEL CONFIG VERIFICATION ==="
+          if [ -f "out/.config" ]; then
+            grep -E "CONFIG_DEVMEM|CONFIG_PROC_PID_MEM|CONFIG_FTRACE_SYSCALLS" out/.config || echo "❌ RESEARCH OPTIONS MISSING!"
+          else
+            echo "⚠️ No .config found for verification"
+          fi
+
       - name: "📦 Prepare artifact"
         working-directory: ${{ env.WORK_DIR }}
         run: |
           cp out/dist/Image Image.${{ matrix.variant }}
+
       - name: "📤 Upload kernel"
         uses: actions/upload-artifact@v4
         with:
@@ -236,17 +269,14 @@ jobs:
         run: |
           BUILD_TIME=$(date +'%Y-%m-%d')
           git clone --depth=1 https://github.com/topnotchfreaks/AnyKernel3 -b master AnyKernel3
-          
-          # Copy kernels
           find kernels -name "Image.*" -exec cp {} AnyKernel3/ \;
-          
-          # Create ZIP
-          ZIP_NAME="Anykernel3_${{ github.event.inputs.kernelBranch }}_${BUILD_TIME}.zip"
+          ZIP_NAME="ResearchKernel_${BUILD_TIME}.zip"
           cd AnyKernel3
           zip -r9 "../$ZIP_NAME" * -x .git/*
           cd ..
           echo "ZIP_PATH=$(pwd)/$ZIP_NAME" >> $GITHUB_ENV
           echo "ZIP_NAME=$ZIP_NAME" >> $GITHUB_ENV
+
       - name: "📤 Upload final package"
         uses: actions/upload-artifact@v4
         with:
@@ -259,12 +289,12 @@ jobs:
         run: |
           if [[ -f "${{ env.ZIP_PATH }}" ]]; then
             curl -s -F document=@"${{ env.ZIP_PATH }}" \
-                 -F caption="✅ Kernel Build Complete - $(date '+%Y-%m-%d %H:%M:%S')" \
+                 -F caption="✅ RESEARCH Kernel Build Complete - $(date '+%Y-%m-%d %H:%M:%S')" \
                  -F chat_id=${{ secrets.TELEGRAM_USER_ID }} \
                  "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendDocument"
           else
             curl -s -X POST \
                  -d chat_id=${{ secrets.TELEGRAM_USER_ID }} \
-                 -d text="❌ Kernel build failed" \
+                 -d text="❌ Research kernel build failed" \
                  "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage"
           fi
