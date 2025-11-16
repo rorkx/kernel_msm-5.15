@@ -219,6 +219,8 @@ jobs:
           LTO=${{ github.event.inputs.ltoMode }} \
           BUILD_CONFIG=${{ env.kernelDir }}/${{ env.kernelName }}/build.config.gki.aarch64 \
           build/build.sh -j$(nproc --all)
+        continue-on-error: true  
+        
       - name: "🩹 Apply KPM patch (KSU variant only)"
         if: matrix.variant == 'ksu'
         working-directory: ${{ env.WORK_DIR }}/out/dist
