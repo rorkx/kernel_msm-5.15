@@ -1,4 +1,4 @@
-name: "🔬 Build Research Kernel"
+name: "Build Research Kernel"
 
 env:
   OUT_DIR: "out"
@@ -48,7 +48,6 @@ jobs:
           sudo apt-get install -y build-essential flex bison libssl-dev libelf-dev bc python3 git zip
           sudo apt-get install -y gcc-aarch64-linux-gnu
 
-          # Setup swap for large builds
           sudo fallocate -l 6G /swapfile
           sudo chmod 600 /swapfile
           sudo mkswap /swapfile
@@ -66,14 +65,11 @@ jobs:
       - name: "Configure research kernel"
         working-directory: ${{ env.KERNEL_DIR }}
         run: |
-          # Create base config
           make ARCH=arm64 topaz_defconfig
           
-          # Apply research configurations
           if [ "${{ github.event.inputs.researchMode }}" = "true" ]; then
             echo "Applying research configurations..."
             
-            # Memory access and debugging
             ./scripts/config --enable DEBUG_FS
             ./scripts/config --enable FTRACE
             ./scripts/config --enable FTRACE_SYSCALLS
@@ -82,55 +78,35 @@ jobs:
             ./scripts/config --enable KALLSYMS_ALL
             ./scripts/config --enable KPROBES
             ./scripts/config --enable UPROBES
-            
-            # Kernel debugging
             ./scripts/config --enable KGDB
             ./scripts/config --enable KGDB_SERIAL_CONSOLE
             ./scripts/config --enable KGDB_KDB
-            
-            # Performance and profiling
             ./scripts/config --enable PERF_EVENTS
             ./scripts/config --enable HW_PERF_EVENTS
-            
-            # Module loading
             ./scripts/config --disable MODULE_SIG
             ./scripts/config --disable MODULE_SIG_FORCE
-            
-            # BPF for research
             ./scripts/config --enable BPF
             ./scripts/config --enable BPF_SYSCALL
             ./scripts/config --enable BPF_JIT
-            
-            # Memory analysis
             ./scripts/config --enable PROC_PID_MEM
             ./scripts/config --enable PROC_KCORE
             ./scripts/config --enable KEXEC
             ./scripts/config --enable MAGIC_SYSRQ
-            
-            # Security research
             ./scripts/config --disable SECURITY_SELINUX_DEVELOP
             ./scripts/config --set-val SECURITY_SELINUX_CHECKREQPROT_VALUE 0
-            
-            # Debug info
             ./scripts/config --enable DEBUG_INFO
             ./scripts/config --enable DEBUG_INFO_DWARF5
             ./scripts/config --enable DEBUG_KERNEL
             
             echo "Research configurations applied"
-          else
-            echo "Using standard configuration"
           fi
           
-          # Set localversion
           if [ -n "${{ github.event.inputs.localVersion }}" ]; then
             echo "CONFIG_LOCALVERSION=\"${{ github.event.inputs.localVersion }}\"" >> .config
           fi
           
-          # Finalize config
           make ARCH=arm64 olddefconfig
-          
-          # Verify critical options
-          echo "Verifying research configurations:"
+          echo "Config verification:"
           grep -E "DEBUG_FS|FTRACE_SYSCALLS|DEVMEM|KPROBES|KGDB" .config | head -10
 
       - name: "Build research kernel"
@@ -138,11 +114,8 @@ jobs:
         run: |
           export ARCH=arm64
           export CROSS_COMPILE=aarch64-linux-gnu-
-          
-          echo "Starting kernel compilation..."
           make -j$(nproc --all)
           
-          # Verify build result
           if [ -f "arch/arm64/boot/Image.gz" ]; then
             echo "Kernel compiled successfully!"
             ls -la arch/arm64/boot/Image.gz
@@ -157,85 +130,44 @@ jobs:
           mkdir -p anykernel_research/kernel
           cp arch/arm64/boot/Image.gz anykernel_research/kernel/
           
-          # Create research-focused anykernel script (FIXED VERSION)
-          cat > anykernel_research/anykernel.sh << 'EOF'
+          # Используем heredoc с правильным экранированием
+          cat > anykernel_research/anykernel.sh << 'ENDOFFILE'
 #!/bin/bash
 
 device_compatible="topaz tapas sapphire sapphiren";
 
-ui_print " ";
-ui_print "RESEARCH KERNEL INSTALLATION";
-ui_print "==================================";
-ui_print " ";
-
-ui_print "Features enabled:";
-ui_print "  - Full memory access (/dev/mem)";
-ui_print "  - System call tracing (FTRACE)";
-ui_print "  - Kernel debugging (KGDB/KDB)";
-ui_print "  - Dynamic probes (KPROBES/UPROBES)";
-ui_print "  - Unsigned module loading";
-ui_print "  - BPF program support";
-ui_print "  - Process memory access";
-ui_print " ";
-
-ui_print "Installing research kernel...";
+ui_print "Installing Research Kernel...";
 dd if=/tmp/anykernel/kernel/Image.gz of=/dev/block/bootdevice/by-name/boot;
-
-ui_print " ";
-ui_print "Research kernel installed!";
-ui_print " ";
-ui_print "WARNING: This kernel has reduced security";
-ui_print "features for research purposes.";
-ui_print " ";
-EOF
+ui_print "Research kernel installed successfully!";
+ENDOFFILE
 
           chmod +x anykernel_research/anykernel.sh
           
-          # Create ZIP
           cd anykernel_research
           ZIP_NAME="ResearchKernel_${{ github.event.inputs.kernelConfig }}_${{ env.BUILD_TIME }}.zip"
           zip -r9 "../$ZIP_NAME" .
           cd ..
           
           echo "ZIP_PATH=$(pwd)/$ZIP_NAME" >> $GITHUB_ENV
-          echo "ZIP_NAME=$ZIP_NAME" >> $GITHUB_ENV
-          
           echo "Package created: $ZIP_NAME"
-          ls -la $ZIP_NAME
 
       - name: "Upload research artifact"
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.ZIP_NAME }}
-          path: ${{ env.ZIP_PATH }}
+          name: research-kernel
+          path: ${{ env.KERNEL_DIR }}/ResearchKernel_*.zip
           retention-days: 30
 
       - name: "Build report"
         if: always()
         run: |
-          echo " "
-          echo "RESEARCH KERNEL BUILD REPORT"
-          echo "================================"
-          echo " "
+          echo "Research Kernel Build Report"
           echo "Build time: ${{ env.BUILD_TIME }}"
           echo "Configuration: ${{ github.event.inputs.kernelConfig }}"
           echo "Research mode: ${{ github.event.inputs.researchMode }}"
-          echo "Local version: ${{ github.event.inputs.localVersion }}"
-          echo " "
           
-          if [ -f "${{ env.ZIP_PATH }}" ]; then
+          if [ -f "${{ env.KERNEL_DIR }}/ResearchKernel_"*.zip ]; then
             echo "BUILD SUCCESSFUL"
-            echo "Artifact: ${{ env.ZIP_NAME }}"
-            echo " "
-            echo "Research features included:"
-            echo "  - Memory access: /dev/mem, /proc/pid/mem"
-            echo "  - Tracing: ftrace, kprobes, uprobes"
-            echo "  - Debugging: kgdb, kdb, debugfs"
-            echo "  - Profiling: perf events, hw perf"
-            echo "  - Modules: unsigned module loading"
-            echo "  - BPF: eBPF programs and JIT"
-            echo " "
           else
             echo "BUILD FAILED"
-            echo " "
           fi
